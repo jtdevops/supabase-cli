@@ -1,0 +1,75 @@
+name: release
+
+on:
+  workflow_call:
+    inputs:
+      supabase_cli_version:
+        description: 'Supabase CLI version to build (e.g., 1.130.0)'
+        required: true
+        type: string
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+    inputs:
+      supabase_cli_version:
+        description: 'Supabase CLI version to build (e.g., 1.130.0)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          ref: 'main'
+          fetch-depth: 0
+      - name: Set release version
+        run: echo "RELEASE_VERSION=${{ inputs.supabase_cli_version || github.event.inputs.supabase_cli_version }}" >> $GITHUB_ENV
+      - name: Check Docker Hub credentials
+        id: check-dockerhub
+        run: |
+          if [ -n "${{ secrets.DOCKERHUB_USERNAME }}" ] && [ -n "${{ secrets.DOCKERHUB_TOKEN }}" ]; then
+            echo "has_dockerhub=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_dockerhub=false" >> $GITHUB_OUTPUT
+          fi
+      - name: Set image tags
+        id: tags
+        run: |
+          TAGS="ghcr.io/${{ github.repository_owner }}/supabase-cli:${{ env.RELEASE_VERSION }}"
+          if [ "${{ steps.check-dockerhub.outputs.has_dockerhub }}" == "true" ]; then
+            TAGS="$TAGS,${{ secrets.DOCKERHUB_USERNAME }}/supabase-cli:${{ env.RELEASE_VERSION }}"
+          fi
+          echo "tags=$TAGS" >> $GITHUB_OUTPUT
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Log in to Docker Hub
+        if: steps.check-dockerhub.outputs.has_dockerhub == 'true'
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+      # Build and push Docker image with Buildx
+      # https://github.com/docker/build-push-action
+      - name: Build and push Docker image
+        id: build-and-push
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+          build-args: |
+            version=${{ env.RELEASE_VERSION }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

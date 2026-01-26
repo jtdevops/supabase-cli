@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+set -e
+
+IMAGE="jtdev0ps/supabase-cli:1.167.4"
+
+# First argument = network mode (optional)
+NETWORK_MODE="$1"
+shift || true
+
+echo "Using Docker network mode: ${NETWORK_MODE:-default}"
+
+DOCKER_ARGS=(
+  docker run
+  --rm
+  -it
+  --label "monocker.enable=false"
+  -v "$(pwd):/workspace"
+  -w /workspace
+)
+
+if [[ -n "$NETWORK_MODE" ]]; then
+  DOCKER_ARGS+=(--network "$NETWORK_MODE")
+fi
+
+# Pull image if missing
+docker image inspect "$IMAGE" >/dev/null 2>&1 || docker pull "$IMAGE"
+
+# Decide what to run
+if [[ $# -eq 0 ]]; then
+  CMD=("${DOCKER_ARGS[@]}" "$IMAGE" sh)
+
+elif [[ "$1" == "sh" || "$1" == "bash" ]]; then
+  CMD=("${DOCKER_ARGS[@]}" "$IMAGE" "$@")
+
+else
+  # Strip leading "supabase" if present
+  if [[ "$1" == "supabase" ]]; then
+    shift
+  fi
+
+  if [[ $# -eq 0 ]]; then
+    CMD=("${DOCKER_ARGS[@]}" "$IMAGE" supabase)
+  else
+    CMD=("${DOCKER_ARGS[@]}" "$IMAGE" supabase "$@")
+  fi
+fi
+
+# Log command
+echo "> ${CMD[*]}"
+
+# Execute
+exec "${CMD[@]}"
